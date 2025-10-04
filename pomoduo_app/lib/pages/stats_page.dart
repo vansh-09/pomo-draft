@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../db/session_db.dart';
 import '../models/session.dart';
+import 'dart:math';
 
 class StatsPage extends StatefulWidget {
   const StatsPage({super.key});
@@ -12,6 +14,12 @@ class StatsPage extends StatefulWidget {
 class _StatsPageState extends State<StatsPage> {
   int totalSessions = 0;
   double averageDurationMinutes = 0.0;
+  int totalFocusMinutes = 0;
+  int bestDaySessions = 0;
+  int longestStreak = 0;
+  double consistencyScore = 0.0;
+
+  List<Session> sessions = [];
   bool isLoading = true;
 
   @override
@@ -22,15 +30,44 @@ class _StatsPageState extends State<StatsPage> {
 
   Future<void> _loadStats() async {
     try {
-      List<Session> sessions = await SessionDB.instance.fetchSessions();
+      sessions = await SessionDB.instance.fetchSessions();
+
       if (sessions.isNotEmpty) {
-        // Calculate total duration in minutes
         double totalDurationMinutes = sessions.fold(
             0.0, (sum, session) => sum + session.duration.inMinutes.toDouble());
+
+        // Group by day
+        Map<DateTime, List<Session>> groupedByDay = {};
+        for (var s in sessions) {
+          DateTime day = DateTime(s.startTime.year, s.startTime.month, s.startTime.day);
+          groupedByDay.putIfAbsent(day, () => []).add(s);
+        }
+
+        // Best day (max sessions)
+        bestDaySessions = groupedByDay.values.map((list) => list.length).fold(0, max);
+
+        // Longest streak
+        List<DateTime> sortedDays = groupedByDay.keys.toList()..sort();
+        int currentStreak = 1;
+        int maxStreak = 1;
+        for (int i = 1; i < sortedDays.length; i++) {
+          if (sortedDays[i].difference(sortedDays[i - 1]).inDays == 1) {
+            currentStreak++;
+            maxStreak = max(maxStreak, currentStreak);
+          } else {
+            currentStreak = 1;
+          }
+        }
+        longestStreak = maxStreak;
+
+        // Consistency score: % of days with >=4 sessions
+        int consistentDays = groupedByDay.values.where((list) => list.length >= 4).length;
+        consistencyScore = (consistentDays / groupedByDay.length) * 100;
 
         setState(() {
           totalSessions = sessions.length;
           averageDurationMinutes = totalDurationMinutes / totalSessions;
+          totalFocusMinutes = totalDurationMinutes.toInt();
           isLoading = false;
         });
       } else {
@@ -98,25 +135,26 @@ class _StatsPageState extends State<StatsPage> {
                 )
               else
                 Expanded(
-                  child: Column(
+                  child: ListView(
                     children: [
-                      _buildStatCard(
-                        'Total Sessions',
-                        totalSessions.toString(),
-                        Icons.play_circle_fill,
-                      ),
+                      _buildStatCard('Total Sessions', totalSessions.toString(), Icons.play_circle_fill),
                       const SizedBox(height: 16),
-                      _buildStatCard(
-                        'Average Duration',
-                        '${averageDurationMinutes.toStringAsFixed(1)} min',
-                        Icons.timer,
-                      ),
+                      _buildStatCard('Average Duration', '${averageDurationMinutes.toStringAsFixed(1)} min', Icons.timer),
                       const SizedBox(height: 16),
-                      _buildStatCard(
-                        'Total Focus Time',
-                        '${(totalSessions * 25)} min',
-                        Icons.access_time,
+                      _buildStatCard('Total Focus Time', '${totalFocusMinutes} min', Icons.access_time),
+                      const SizedBox(height: 16),
+                      _buildStatCard('Best Day Sessions', bestDaySessions.toString(), Icons.star),
+                      const SizedBox(height: 16),
+                      _buildStatCard('Longest Streak', '$longestStreak days', Icons.local_fire_department),
+                      const SizedBox(height: 16),
+                      _buildStatCard('Consistency Score', '${consistencyScore.toStringAsFixed(1)}%', Icons.check_circle),
+
+                      const SizedBox(height: 30),
+                      const Text(
+                        "Weekly Activity",
+                        style: TextStyle(color: Colors.white70, fontSize: 18, fontWeight: FontWeight.w600),
                       ),
+                      const SizedBox(height: 200, child: _WeeklyBarChart()),
                     ],
                   ),
                 ),
@@ -176,6 +214,32 @@ class _StatsPageState extends State<StatsPage> {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _WeeklyBarChart extends StatelessWidget {
+  const _WeeklyBarChart({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final data = [4, 6, 3, 7, 5, 2, 8]; // TODO: hook real weekly data
+
+    return BarChart(
+      BarChartData(
+        alignment: BarChartAlignment.spaceAround,
+        maxY: 10,
+        barGroups: data.asMap().entries.map((entry) {
+          int index = entry.key;
+          int value = entry.value;
+          return BarChartGroupData(
+            x: index,
+            barRods: [
+              BarChartRodData(toY: value.toDouble(), color: Colors.blue)
+            ],
+          );
+        }).toList(),
       ),
     );
   }
