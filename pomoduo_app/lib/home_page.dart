@@ -79,29 +79,36 @@ class TimerPage extends StatefulWidget {
 }
 
 class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
-  static const int _initialSeconds = 25 * 60; // 25 minutes
-  int _seconds = _initialSeconds;
+  int _focusSeconds = 25 * 60; // default 25 min
+  int _seconds = 25 * 60;
   Timer? _timer;
   bool _isRunning = false;
 
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
-
-  late ConfettiController _confettiController; // 🎉 confetti controller
+  late ConfettiController _confettiController;
 
   @override
   void initState() {
     super.initState();
-    _pulseController = AnimationController(
-      duration: const Duration(seconds: 1),
-      vsync: this,
-    );
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.1).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
-    );
+    _loadSettings(); // ✅ load custom durations
+
+    _pulseController =
+        AnimationController(vsync: this, duration: const Duration(seconds: 1));
+    _pulseAnimation = Tween(begin: 1.0, end: 1.1).animate(
+        CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut));
 
     _confettiController =
         ConfettiController(duration: const Duration(seconds: 3));
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    int focusMinutes = prefs.getInt('focusMinutes') ?? 25;
+    setState(() {
+      _focusSeconds = focusMinutes * 60;
+      _seconds = _focusSeconds;
+    });
   }
 
   void _toggleTimer() {
@@ -130,34 +137,27 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
     _pulseController.stop();
     setState(() => _isRunning = false);
 
-    // ✅ Log unfinished session
     final now = DateTime.now();
-    final session = Session(
-      startTime: now.subtract(Duration(seconds: (_initialSeconds - _seconds))),
+    await SessionDB.instance.insertSession(Session(
+      startTime: now.subtract(Duration(seconds: (_focusSeconds - _seconds))),
       endTime: now,
       completed: false,
-    );
-    await SessionDB.instance.insertSession(session);
+    ));
   }
 
   void _resetTimer() async {
     _timer?.cancel();
     _pulseController.reset();
 
-    // ✅ Log unfinished session
-    if (_seconds != _initialSeconds) {
-      final now = DateTime.now();
-      final session = Session(
-        startTime:
-            now.subtract(Duration(seconds: (_initialSeconds - _seconds))),
-        endTime: now,
-        completed: false,
-      );
-      await SessionDB.instance.insertSession(session);
-    }
+    final now = DateTime.now();
+    await SessionDB.instance.insertSession(Session(
+      startTime: now.subtract(Duration(seconds: (_focusSeconds - _seconds))),
+      endTime: now,
+      completed: false,
+    ));
 
     setState(() {
-      _seconds = _initialSeconds;
+      _seconds = _focusSeconds;
       _isRunning = false;
     });
   }
@@ -167,14 +167,12 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
     _pulseController.stop();
     setState(() => _isRunning = false);
 
-    // ✅ Save session in DB
     await SessionDB.instance.insertSession(Session(
-      startTime: DateTime.now().subtract(Duration(seconds: _initialSeconds)),
+      startTime: DateTime.now().subtract(Duration(seconds: _focusSeconds)),
       endTime: DateTime.now(),
       completed: true,
     ));
 
-    // 🎉 trigger confetti
     _confettiController.play();
 
     showDialog(
@@ -195,7 +193,7 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
     );
   }
 
-  double get _progress => 1.0 - (_seconds / _initialSeconds);
+  double get _progress => 1.0 - (_seconds / _focusSeconds);
 
   String get _timeString {
     final minutes = _seconds ~/ 60;
@@ -207,8 +205,19 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
   void dispose() {
     _timer?.cancel();
     _pulseController.dispose();
-    _confettiController.dispose(); // 🎉 dispose
+    _confettiController.dispose();
     super.dispose();
+  }
+
+  Future<void> _openSettings() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const SettingsPage()),
+    );
+    await _loadSettings(); // ✅ reload new durations after coming back
+    setState(() {
+      _seconds = _focusSeconds;
+    });
   }
 
   @override
@@ -280,14 +289,11 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      // Reset Button
                       CircularButton(
                         icon: Icons.refresh,
                         onPressed: _resetTimer,
                         backgroundColor: const Color(0xFF2A2A2E),
                       ),
-
-                      // Play/Pause Button
                       CircularButton(
                         icon: _isRunning ? Icons.pause : Icons.play_arrow,
                         onPressed: _toggleTimer,
@@ -295,18 +301,10 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
                         size: 80,
                         iconSize: 40,
                       ),
-
-                      // Settings Button
                       CircularButton(
                         icon: Icons.settings,
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const SettingsPage(),
-                            ),
-                          );
-                        },
+                        onPressed:
+                            _openSettings, // ✅ dynamically reloads duration
                         backgroundColor: const Color(0xFF2A2A2E),
                       ),
                     ],
@@ -315,8 +313,6 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
               ),
             ),
           ),
-
-          // 🎉 Confetti animation
           ConfettiWidget(
             confettiController: _confettiController,
             blastDirectionality: BlastDirectionality.explosive,
