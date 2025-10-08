@@ -10,6 +10,8 @@ import 'models/session.dart';
 import 'package:confetti/confetti.dart';
 import 'widgets/circular_button.dart';
 import 'widgets/circular_timer_painter.dart';
+import '../db/subject_db.dart';
+import '../models/subject.dart';
 
 // ---------------- HOME PAGE ----------------
 class HomePage extends StatefulWidget {
@@ -27,8 +29,11 @@ class _HomePageState extends State<HomePage> {
 
   void _onItemTapped(int index) {
     setState(() => _selectedIndex = index);
-    _pageController.animateToPage(index,
-        duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
   }
 
   Future<void> _logout() async {
@@ -46,13 +51,14 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('PomoDuo'),
         actions: [
-          IconButton(icon: const Icon(Icons.logout), onPressed: _logout)
+          IconButton(icon: const Icon(Icons.logout), onPressed: _logout),
         ],
       ),
       body: PageView(
-          controller: _pageController,
-          children: _pages,
-          onPageChanged: (i) => setState(() => _selectedIndex = i)),
+        controller: _pageController,
+        children: _pages,
+        onPageChanged: (i) => setState(() => _selectedIndex = i),
+      ),
       bottomNavigationBar: BottomNavigationBar(
         backgroundColor: const Color(0xFF121214),
         currentIndex: _selectedIndex,
@@ -79,32 +85,56 @@ class TimerPage extends StatefulWidget {
 }
 
 class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
-  static const int _initialSeconds = 25 * 60; // 25 minutes
-  int _seconds = _initialSeconds;
+  int _focusMinutes = 25; // dynamically loaded
+  int _seconds = 25 * 60;
   Timer? _timer;
   bool _isRunning = false;
 
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
+  late ConfettiController _confettiController;
 
-  late ConfettiController _confettiController; // 🎉 confetti controller
+  List<Subject> _subjects = [];
+  Subject? _selectedSubject;
 
   @override
   void initState() {
     super.initState();
-    _pulseController = AnimationController(
-      duration: const Duration(seconds: 1),
-      vsync: this,
-    );
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.1).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
-    );
-
+    _pulseController =
+        AnimationController(duration: const Duration(seconds: 1), vsync: this);
+    _pulseAnimation =
+        Tween<double>(begin: 1.0, end: 1.1).animate(CurvedAnimation(
+      parent: _pulseController,
+      curve: Curves.easeInOut,
+    ));
     _confettiController =
         ConfettiController(duration: const Duration(seconds: 3));
+
+    _loadTimerSettings();
+    _loadSubjects();
+  }
+
+  Future<void> _loadTimerSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    final focusMinutes = prefs.getInt('focusMinutes') ?? 25;
+    setState(() {
+      _focusMinutes = focusMinutes;
+      _seconds = _focusMinutes * 60;
+    });
+  }
+
+  Future<void> _loadSubjects() async {
+    final subjects = await SubjectDB.instance.getSubjects();
+    setState(() => _subjects = subjects);
   }
 
   void _toggleTimer() {
+    if (_selectedSubject == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a subject first')),
+      );
+      return;
+    }
     if (_isRunning) {
       _pauseTimer();
     } else {
@@ -115,7 +145,6 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
   void _startTimer() {
     setState(() => _isRunning = true);
     _pulseController.repeat(reverse: true);
-
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_seconds > 0) {
         setState(() => _seconds--);
@@ -125,77 +154,46 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
     });
   }
 
-  void _pauseTimer() async {
+  void _pauseTimer() {
     _timer?.cancel();
     _pulseController.stop();
     setState(() => _isRunning = false);
-
-    // ✅ Log unfinished session
-    final now = DateTime.now();
-    final session = Session(
-      startTime: now.subtract(Duration(seconds: (_initialSeconds - _seconds))),
-      endTime: now,
-      completed: false,
-    );
-    await SessionDB.instance.insertSession(session);
   }
 
-  void _resetTimer() async {
+  void _resetTimer() {
     _timer?.cancel();
     _pulseController.reset();
-
-    // ✅ Log unfinished session
-    if (_seconds != _initialSeconds) {
-      final now = DateTime.now();
-      final session = Session(
-        startTime:
-            now.subtract(Duration(seconds: (_initialSeconds - _seconds))),
-        endTime: now,
-        completed: false,
-      );
-      await SessionDB.instance.insertSession(session);
-    }
-
     setState(() {
-      _seconds = _initialSeconds;
+      _seconds = _focusMinutes * 60;
       _isRunning = false;
     });
   }
 
-  void _completeTimer() async {
+  void _completeTimer() {
     _timer?.cancel();
     _pulseController.stop();
     setState(() => _isRunning = false);
-
-    // ✅ Save session in DB
-    await SessionDB.instance.insertSession(Session(
-      startTime: DateTime.now().subtract(Duration(seconds: _initialSeconds)),
-      endTime: DateTime.now(),
-      completed: true,
-    ));
-
-    // 🎉 trigger confetti
     _confettiController.play();
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Pomodoro Complete!'),
-        content: const Text('Great job! Time for a break.'),
+        content: Text('Subject: ${_selectedSubject?.name ?? "N/A"}'),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.of(context).pop();
               _resetTimer();
             },
-            child: const Text('Start New Session'),
+            child: const Text('OK'),
           ),
         ],
       ),
     );
   }
 
-  double get _progress => 1.0 - (_seconds / _initialSeconds);
+  double get _progress => 1.0 - (_seconds / (_focusMinutes * 60));
 
   String get _timeString {
     final minutes = _seconds ~/ 60;
@@ -207,7 +205,7 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
   void dispose() {
     _timer?.cancel();
     _pulseController.dispose();
-    _confettiController.dispose(); // 🎉 dispose
+    _confettiController.dispose();
     super.dispose();
   }
 
@@ -225,15 +223,47 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
                 children: [
                   const Text(
                     'Focus Time',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w300,
-                      letterSpacing: 1,
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.w300),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ---------- BEAUTIFIED DROPDOWN ----------
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E1E22),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF9B4CFF), width: 1),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<Subject>(
+                        dropdownColor: const Color(0xFF1E1E22),
+                        value: _selectedSubject,
+                        hint: const Text(
+                          'Select Subject',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                        icon: const Icon(Icons.arrow_drop_down,
+                            color: Colors.white70),
+                        isExpanded: true,
+                        items: _subjects
+                            .map((s) => DropdownMenuItem(
+                                  value: s,
+                                  child: Text(
+                                    s.name,
+                                    style:
+                                        const TextStyle(color: Colors.white),
+                                  ),
+                                ))
+                            .toList(),
+                        onChanged: (s) => setState(() => _selectedSubject = s),
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 60),
+                  const SizedBox(height: 40),
 
-                  // Circular Timer
+                  // ---------- TIMER DISPLAY ----------
                   ScaleTransition(
                     scale: _isRunning
                         ? _pulseAnimation
@@ -247,47 +277,28 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
                           isRunning: _isRunning,
                         ),
                         child: Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                _timeString,
-                                style: const TextStyle(
-                                  fontSize: 48,
-                                  fontWeight: FontWeight.w300,
-                                  letterSpacing: 2,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                _isRunning ? 'Focus Session' : 'Ready to Focus',
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  color: Colors.white70,
-                                  letterSpacing: 1,
-                                ),
-                              ),
-                            ],
+                          child: Text(
+                            _timeString,
+                            style: const TextStyle(
+                                fontSize: 48,
+                                fontWeight: FontWeight.w300,
+                                color: Colors.white),
                           ),
                         ),
                       ),
                     ),
                   ),
+                  const SizedBox(height: 60),
 
-                  const SizedBox(height: 80),
-
-                  // Control Buttons
+                  // ---------- BUTTONS ----------
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      // Reset Button
                       CircularButton(
                         icon: Icons.refresh,
                         onPressed: _resetTimer,
                         backgroundColor: const Color(0xFF2A2A2E),
                       ),
-
-                      // Play/Pause Button
                       CircularButton(
                         icon: _isRunning ? Icons.pause : Icons.play_arrow,
                         onPressed: _toggleTimer,
@@ -295,17 +306,16 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
                         size: 80,
                         iconSize: 40,
                       ),
-
-                      // Settings Button
                       CircularButton(
                         icon: Icons.settings,
-                        onPressed: () {
-                          Navigator.push(
+                        onPressed: () async {
+                          await Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => const SettingsPage(),
-                            ),
+                                builder: (_) => const SettingsPage()),
                           );
+                          await _loadTimerSettings(); // reload duration
+                          await _loadSubjects(); // reload subjects
                         },
                         backgroundColor: const Color(0xFF2A2A2E),
                       ),
@@ -316,17 +326,11 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
             ),
           ),
 
-          // 🎉 Confetti animation
+          // ---------- CONFETTI ----------
           ConfettiWidget(
             confettiController: _confettiController,
             blastDirectionality: BlastDirectionality.explosive,
             shouldLoop: false,
-            colors: const [
-              Colors.purple,
-              Colors.blue,
-              Colors.orange,
-              Colors.green,
-            ],
           ),
         ],
       ),
