@@ -1,21 +1,27 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'pages/auth_page.dart';
-import 'pages/settings_page.dart';
-import 'pages/sessions_page.dart';
-import 'pages/stats_page.dart';
-import 'db/session_db.dart';
-import 'models/session.dart';
 import 'package:confetti/confetti.dart';
+import 'pages/settings_page.dart';
+import 'models/subject.dart';
+import 'db/subject_db.dart';
 import 'widgets/circular_button.dart';
 import 'widgets/circular_timer_painter.dart';
-import '../db/subject_db.dart';
-import '../models/subject.dart';
+import 'pages/quiz_page.dart';
+import 'pages/sessions_page.dart';
+import 'pages/stats_page.dart';
+import 'pages/auth_page.dart';
 
-// ---------------- HOME PAGE ----------------
+class TimerPage extends StatefulWidget {
+  const TimerPage({super.key});
+
+  @override
+  State<TimerPage> createState() => _TimerPageState();
+}
+
+// Simple HomePage wrapper that composes Sessions, Timer and Stats pages
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  const HomePage({Key? key}) : super(key: key);
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -25,24 +31,24 @@ class _HomePageState extends State<HomePage> {
   final PageController _pageController = PageController(initialPage: 1);
   int _selectedIndex = 1;
 
-  final List<Widget> _pages = const [SessionsPage(), TimerPage(), StatsPage()];
+  final List<Widget> _pages = [
+    const SessionsPage(),
+    const TimerPage(),
+    const StatsPage(),
+  ];
 
   void _onItemTapped(int index) {
     setState(() => _selectedIndex = index);
-    _pageController.animateToPage(
-      index,
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.easeInOut,
-    );
+    _pageController.animateToPage(index,
+        duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
   }
 
   Future<void> _logout() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('isLoggedIn', false);
-    if (mounted) {
-      Navigator.of(context)
-          .pushReplacement(MaterialPageRoute(builder: (_) => const AuthPage()));
-    }
+    if (!mounted) return;
+    Navigator.of(context)
+        .pushReplacement(MaterialPageRoute(builder: (_) => const AuthPage()));
   }
 
   @override
@@ -51,7 +57,7 @@ class _HomePageState extends State<HomePage> {
       appBar: AppBar(
         title: const Text('PomoDuo'),
         actions: [
-          IconButton(icon: const Icon(Icons.logout), onPressed: _logout),
+          IconButton(icon: const Icon(Icons.logout), onPressed: _logout)
         ],
       ),
       body: PageView(
@@ -76,16 +82,8 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-// ---------------- TIMER PAGE ----------------
-class TimerPage extends StatefulWidget {
-  const TimerPage({super.key});
-
-  @override
-  State<TimerPage> createState() => _TimerPageState();
-}
-
 class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
-  int _focusMinutes = 25; // dynamically loaded
+  int _focusMinutes = 25;
   int _seconds = 25 * 60;
   Timer? _timer;
   bool _isRunning = false;
@@ -96,6 +94,10 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
 
   List<Subject> _subjects = [];
   Subject? _selectedSubject;
+
+  // NEW: Topic input
+  TextEditingController _topicController = TextEditingController();
+  String? _topic;
 
   @override
   void initState() {
@@ -110,8 +112,12 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
     _confettiController =
         ConfettiController(duration: const Duration(seconds: 3));
 
-    _loadTimerSettings();
-    _loadSubjects();
+    _initializeTimerPage();
+  }
+
+  Future<void> _initializeTimerPage() async {
+    await _loadTimerSettings();
+    await _loadSubjects();
   }
 
   Future<void> _loadTimerSettings() async {
@@ -135,6 +141,14 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
       );
       return;
     }
+
+    if (_topicController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a topic')),
+      );
+      return;
+    }
+
     if (_isRunning) {
       _pauseTimer();
     } else {
@@ -143,6 +157,9 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
   }
 
   void _startTimer() {
+    _topic = _topicController.text.trim();
+    _saveTopic(_topic!);
+
     setState(() => _isRunning = true);
     _pulseController.repeat(reverse: true);
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -169,17 +186,27 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
     });
   }
 
-  void _completeTimer() {
+  void _completeTimer() async {
     _timer?.cancel();
     _pulseController.stop();
     setState(() => _isRunning = false);
     _confettiController.play();
 
+    final prefs = await SharedPreferences.getInstance();
+    final topic = prefs.getString('currentTopic') ?? "N/A";
+
+    // Navigate to Quiz Page with topic
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => QuizPage(topic: topic)),
+    );
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Pomodoro Complete!'),
-        content: Text('Subject: ${_selectedSubject?.name ?? "N/A"}'),
+        content:
+            Text('Subject: ${_selectedSubject?.name ?? "N/A"}\nTopic: $topic'),
         actions: [
           TextButton(
             onPressed: () {
@@ -191,6 +218,11 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
         ],
       ),
     );
+  }
+
+  Future<void> _saveTopic(String topic) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('currentTopic', topic);
   }
 
   double get _progress => 1.0 - (_seconds / (_focusMinutes * 60));
@@ -206,6 +238,7 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
     _timer?.cancel();
     _pulseController.dispose();
     _confettiController.dispose();
+    _topicController.dispose();
     super.dispose();
   }
 
@@ -227,14 +260,37 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
                   ),
                   const SizedBox(height: 20),
 
-                  // ---------- BEAUTIFIED DROPDOWN ----------
+                  // ---------- TOPIC INPUT ----------
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                     decoration: BoxDecoration(
                       color: const Color(0xFF1E1E22),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFF9B4CFF), width: 1),
+                      border:
+                          Border.all(color: const Color(0xFF9B4CFF), width: 1),
+                    ),
+                    child: TextField(
+                      controller: _topicController,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        hintText: 'Enter topic',
+                        hintStyle: TextStyle(color: Colors.white70),
+                        border: InputBorder.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // ---------- SUBJECT DROPDOWN ----------
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E1E22),
+                      borderRadius: BorderRadius.circular(12),
+                      border:
+                          Border.all(color: const Color(0xFF9B4CFF), width: 1),
                     ),
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<Subject>(
@@ -252,8 +308,7 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
                                   value: s,
                                   child: Text(
                                     s.name,
-                                    style:
-                                        const TextStyle(color: Colors.white),
+                                    style: const TextStyle(color: Colors.white),
                                   ),
                                 ))
                             .toList(),
@@ -314,8 +369,7 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
                             MaterialPageRoute(
                                 builder: (_) => const SettingsPage()),
                           );
-                          await _loadTimerSettings(); // reload duration
-                          await _loadSubjects(); // reload subjects
+                          await _initializeTimerPage();
                         },
                         backgroundColor: const Color(0xFF2A2A2E),
                       ),

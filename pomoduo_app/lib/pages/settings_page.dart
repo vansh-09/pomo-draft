@@ -71,7 +71,7 @@ class _SettingsPageState extends State<SettingsPage> {
               title: const Text("Focus Duration (minutes)"),
               trailing: DropdownButton<int>(
                 value: _focusMinutes,
-                items: [15, 20, 25, 30, 45, 60]
+                items: [1, 15, 20, 25, 30, 45, 60]
                     .map((e) => DropdownMenuItem(value: e, child: Text("$e")))
                     .toList(),
                 onChanged: (val) {
