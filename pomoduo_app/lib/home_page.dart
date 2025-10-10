@@ -391,3 +391,6 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
     );
   }
 }
+
+// There is already a HomePage wrapper defined above. The timer page is the main
+// feature; use the existing wrapper. No duplicate HomePage definition is needed.

@@ -1,18 +1,25 @@
-import requests
+from flask import Flask, request, jsonify
+from google.genai import Client
 
-def generate_quiz(topic):
-    url = "https://api-inference.huggingface.co/models/iarfmoose/t5-base-question-generator"
-    headers = {"Authorization": f"Bearer YOUR_API_TOKEN"}
+app = Flask(__name__)
+client = Client(api_key="AIzaSyAo-kTX8LV0aMJ9EV_hdSdBkQq9_6Hj_cs")
 
-    # Prepare the input for the model
-    context = f"Explain the concept of {topic}."
-    answer = f"A concept in {topic}."
-    inputs = f"<answer> {answer} <context> {context}"
+@app.route("/generate_quiz", methods=["POST"])
+def generate_quiz():
+    topic = request.json.get("topic")
+    if not topic:
+        return jsonify({"error": "Topic is required"}), 400
 
-    response = requests.post(url, headers=headers, json={"inputs": inputs})
+    prompt = f"Generate 5 multiple-choice questions about {topic}, each with 4 options and the correct answer."
 
-    if response.status_code == 200:
-        question = response.json()[0]['generated_text']
-        return [{"question": question, "options": ["A", "B", "C", "D"], "correct_index": 0}]
-    else:
-        return [{"question": "Error generating question", "options": [], "correct_index": -1}]
+    response = client.chat(messages=[{"role": "user", "content": prompt}])
+    questions = parse_questions(response["choices"][0]["message"]["content"])
+
+    return jsonify({"quiz": questions})
+
+def parse_questions(content):
+    # Implement parsing logic here
+    return [{"question": "Sample question", "options": ["A", "B", "C", "D"], "answer": "A"}]
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
