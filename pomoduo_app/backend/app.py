@@ -1,25 +1,67 @@
 from flask import Flask, request, jsonify
-from google.genai import Client
+import random
 
 app = Flask(__name__)
-client = Client(api_key="AIzaSyAo-kTX8LV0aMJ9EV_hdSdBkQq9_6Hj_cs")
 
-@app.route("/generate_quiz", methods=["POST"])
+@app.route('/generate_quiz', methods=['POST'])
 def generate_quiz():
-    topic = request.json.get("topic")
-    if not topic:
-        return jsonify({"error": "Topic is required"}), 400
+    try:
+        data = request.get_json()
+        topic = data.get('topic', 'General')
 
-    prompt = f"Generate 5 multiple-choice questions about {topic}, each with 4 options and the correct answer."
+        # Sample question bank (replace this with dynamic logic if using OpenAI or DB)
+        question_bank = {
+            "C Programming": [
+                {
+                    "question": "What is the size of int in C?",
+                    "options": ["2 bytes", "4 bytes", "8 bytes", "Depends on compiler"],
+                    "answer": "Depends on compiler"
+                },
+                {
+                    "question": "Which of the following is a valid C variable name?",
+                    "options": ["int", "_value", "2name", "float"],
+                    "answer": "_value"
+                },
+            ],
+            "COA": [
+                {
+                    "question": "What does ALU stand for?",
+                    "options": ["Arithmetic Logic Unit", "Array Logic Unit", "Application Logic Unit", "None"],
+                    "answer": "Arithmetic Logic Unit"
+                },
+                {
+                    "question": "What is cache memory used for?",
+                    "options": ["Long-term storage", "Speeding up access", "Storing graphics", "None"],
+                    "answer": "Speeding up access"
+                },
+            ],
+            "DSGT": [
+                {
+                    "question": "What is the primary goal of a data structure?",
+                    "options": ["To store data", "To organize and access data efficiently", "To compile code", "To debug programs"],
+                    "answer": "To organize and access data efficiently"
+                },
+                {
+                    "question": "Which of these is a linear data structure?",
+                    "options": ["Tree", "Graph", "Stack", "Hash Table"],
+                    "answer": "Stack"
+                },
+            ]
+        }
 
-    response = client.chat(messages=[{"role": "user", "content": prompt}])
-    questions = parse_questions(response["choices"][0]["message"]["content"])
+        # Get questions for topic or fallback
+        questions = question_bank.get(topic, [])
+        if not questions:
+            return jsonify({"quiz": []}), 200
 
-    return jsonify({"quiz": questions})
+        # Shuffle & limit
+        random.shuffle(questions)
+        return jsonify({"quiz": questions[:5]}), 200
 
-def parse_questions(content):
-    # Implement parsing logic here
-    return [{"question": "Sample question", "options": ["A", "B", "C", "D"], "answer": "A"}]
+    except Exception as e:
+        print("Error in /generate_quiz:", e)
+        return jsonify({"quiz": [], "error": str(e)}), 500
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5001)

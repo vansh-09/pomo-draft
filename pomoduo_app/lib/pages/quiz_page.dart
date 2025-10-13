@@ -23,14 +23,18 @@ class _QuizPageState extends State<QuizPage> {
     _loadQuiz();
   }
 
-  void _loadQuiz() async {
+  Future<void> _loadQuiz() async {
     try {
+      print("🧠 Loading quiz for topic: ${widget.topic}");
       final questions = await QuizService.generateQuiz(widget.topic);
+      print("📋 Questions fetched: ${questions.length}");
+
       setState(() {
         _questions = questions;
         _loading = false;
       });
     } catch (e) {
+      print("❌ Error loading quiz: $e");
       setState(() {
         _loading = false;
       });
@@ -38,6 +42,8 @@ class _QuizPageState extends State<QuizPage> {
   }
 
   void _answerQuestion(String selectedOption) {
+    if (_questions.isEmpty) return; // Safety guard
+
     if (selectedOption == _questions[_currentIndex].answer) {
       _score++;
     }
@@ -61,11 +67,53 @@ class _QuizPageState extends State<QuizPage> {
       );
     }
 
+    // 🚨 Prevent RangeError when no questions exist
+    if (_questions.isEmpty) {
+      return Scaffold(
+        appBar: AppBar(title: Text("Quiz: ${widget.topic}")),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.quiz_outlined,
+                size: 64,
+                color: Colors.grey,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                "No questions available for this topic 😕",
+                style: TextStyle(fontSize: 18),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                "Please check your internet connection and try again.",
+                style: TextStyle(fontSize: 14, color: Colors.grey),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () {
+                  setState(() {
+                    _loading = true;
+                  });
+                  _loadQuiz();
+                },
+                child: const Text("Retry"),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     if (_quizFinished) {
       return Scaffold(
+        appBar: AppBar(title: Text("Quiz Complete")),
         body: Center(
           child: Text(
-            "Quiz Complete!\nScore: $_score / ${_questions.length}",
+            "🎯 Score: $_score / ${_questions.length}",
             style: const TextStyle(fontSize: 22),
             textAlign: TextAlign.center,
           ),
@@ -80,10 +128,37 @@ class _QuizPageState extends State<QuizPage> {
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              "Question ${_currentIndex + 1} of ${_questions.length}",
-              style: const TextStyle(fontSize: 18),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  "Question ${_currentIndex + 1} of ${_questions.length}",
+                  style: const TextStyle(fontSize: 18),
+                ),
+                // Show offline indicator if questions are from local fallback
+                if (_questions.isNotEmpty && _questions.length == 5)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.orange, width: 1),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.wifi_off, size: 12, color: Colors.orange),
+                        SizedBox(width: 4),
+                        Text(
+                          "Offline",
+                          style: TextStyle(fontSize: 10, color: Colors.orange),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(height: 20),
             Text(
@@ -92,13 +167,15 @@ class _QuizPageState extends State<QuizPage> {
             ),
             const SizedBox(height: 20),
             ...question.options.map((option) => Container(
+                  width: double.infinity,
                   margin: const EdgeInsets.symmetric(vertical: 8),
                   child: ElevatedButton(
                     onPressed: () => _answerQuestion(option),
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
                     child: Text(option, style: const TextStyle(fontSize: 16)),
                   ),
