@@ -19,7 +19,6 @@ class TimerPage extends StatefulWidget {
   State<TimerPage> createState() => _TimerPageState();
 }
 
-// Simple HomePage wrapper that composes Sessions, Timer and Stats pages
 class HomePage extends StatefulWidget {
   const HomePage({Key? key}) : super(key: key);
 
@@ -94,10 +93,7 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
 
   List<Subject> _subjects = [];
   Subject? _selectedSubject;
-
-  // NEW: Topic input
-  TextEditingController _topicController = TextEditingController();
-  String? _topic;
+  String? _selectedTopic;
 
   @override
   void initState() {
@@ -111,7 +107,6 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
     ));
     _confettiController =
         ConfettiController(duration: const Duration(seconds: 3));
-
     _initializeTimerPage();
   }
 
@@ -134,6 +129,19 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
     setState(() => _subjects = subjects);
   }
 
+  String mapTopic(String topic) {
+    switch (topic) {
+      case 'CP':
+        return 'C Programming';
+      case 'COA':
+        return 'COA';
+      case 'DSGT':
+        return 'DSGT';
+      default:
+        return topic;
+    }
+  }
+
   void _toggleTimer() {
     if (_selectedSubject == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -142,9 +150,9 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
       return;
     }
 
-    if (_topicController.text.trim().isEmpty) {
+    if (_selectedTopic == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a topic')),
+        const SnackBar(content: Text('Please select a topic')),
       );
       return;
     }
@@ -156,12 +164,13 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
     }
   }
 
-  void _startTimer() {
-    _topic = _topicController.text.trim();
-    _saveTopic(_topic!);
+  void _startTimer() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('currentTopic', _selectedTopic!);
 
     setState(() => _isRunning = true);
     _pulseController.repeat(reverse: true);
+
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_seconds > 0) {
         setState(() => _seconds--);
@@ -195,14 +204,11 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
     final prefs = await SharedPreferences.getInstance();
     final topic = prefs.getString('currentTopic') ?? "N/A";
 
-    // Navigate to Quiz Page with topic
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => QuizPage(topic: topic)),
-    );
+    if (!mounted) return;
 
-    showDialog(
+    await showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
         title: const Text('Pomodoro Complete!'),
         content:
@@ -211,18 +217,22 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
           TextButton(
             onPressed: () {
               Navigator.of(context).pop();
-              _resetTimer();
             },
-            child: const Text('OK'),
+            child: const Text('Start Quiz'),
           ),
         ],
       ),
     );
-  }
 
-  Future<void> _saveTopic(String topic) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('currentTopic', topic);
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => QuizPage(topic: mapTopic(topic)),
+      ),
+    );
+
+    _resetTimer();
   }
 
   double get _progress => 1.0 - (_seconds / (_focusMinutes * 60));
@@ -238,7 +248,6 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
     _timer?.cancel();
     _pulseController.dispose();
     _confettiController.dispose();
-    _topicController.dispose();
     super.dispose();
   }
 
@@ -260,7 +269,6 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
                   ),
                   const SizedBox(height: 20),
 
-                  // ---------- TOPIC INPUT ----------
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -270,19 +278,38 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
                       border:
                           Border.all(color: const Color(0xFF9B4CFF), width: 1),
                     ),
-                    child: TextField(
-                      controller: _topicController,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(
-                        hintText: 'Enter topic',
-                        hintStyle: TextStyle(color: Colors.white70),
-                        border: InputBorder.none,
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        dropdownColor: const Color(0xFF1E1E22),
+                        value: _selectedTopic,
+                        hint: const Text(
+                          'Select Topic',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                        icon: const Icon(Icons.arrow_drop_down,
+                            color: Colors.white70),
+                        isExpanded: true,
+                        items: const [
+                          DropdownMenuItem(
+                              value: 'CP',
+                              child: Text('C Programming',
+                                  style: TextStyle(color: Colors.white))),
+                          DropdownMenuItem(
+                              value: 'COA',
+                              child: Text('COA',
+                                  style: TextStyle(color: Colors.white))),
+                          DropdownMenuItem(
+                              value: 'DSGT',
+                              child: Text('DSGT',
+                                  style: TextStyle(color: Colors.white))),
+                        ],
+                        onChanged: (value) =>
+                            setState(() => _selectedTopic = value),
                       ),
                     ),
                   ),
                   const SizedBox(height: 20),
 
-                  // ---------- SUBJECT DROPDOWN ----------
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -295,7 +322,12 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<Subject>(
                         dropdownColor: const Color(0xFF1E1E22),
-                        value: _selectedSubject,
+                        value: (_selectedSubject != null &&
+                                _subjects
+                                    .any((s) => s.id == _selectedSubject!.id))
+                            ? _subjects
+                                .firstWhere((s) => s.id == _selectedSubject!.id)
+                            : null,
                         hint: const Text(
                           'Select Subject',
                           style: TextStyle(color: Colors.white70),
@@ -318,7 +350,6 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
                   ),
                   const SizedBox(height: 40),
 
-                  // ---------- TIMER DISPLAY ----------
                   ScaleTransition(
                     scale: _isRunning
                         ? _pulseAnimation
@@ -345,7 +376,6 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
                   ),
                   const SizedBox(height: 60),
 
-                  // ---------- BUTTONS ----------
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
@@ -379,8 +409,6 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
               ),
             ),
           ),
-
-          // ---------- CONFETTI ----------
           ConfettiWidget(
             confettiController: _confettiController,
             blastDirectionality: BlastDirectionality.explosive,
@@ -391,6 +419,3 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
     );
   }
 }
-
-// There is already a HomePage wrapper defined above. The timer page is the main
-// feature; use the existing wrapper. No duplicate HomePage definition is needed.
