@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../db/session_db.dart';
+import '../db/quiz_result_db.dart';
+import '../models/quiz_result.dart';
 import '../models/session.dart';
 import 'dart:math';
 
@@ -21,6 +23,11 @@ class _StatsPageState extends State<StatsPage> {
 
   List<Session> sessions = [];
   bool isLoading = true;
+  Map<String, double> minutesBySubject = {};
+  Map<String, double> minutesByTopic = {};
+  List<double> weeklyDurations = List.filled(7, 0.0);
+  double averageQuizScorePct = 0.0;
+  Map<String, double> avgQuizByTopic = {};
 
   @override
   void initState() {
@@ -64,11 +71,62 @@ class _StatsPageState extends State<StatsPage> {
         int consistentDays = groupedByDay.values.where((list) => list.length >= 4).length;
         consistencyScore = (consistentDays / groupedByDay.length) * 100;
 
+        // Aggregate minutes by subject/topic
+        final Map<String, double> subjectAgg = {};
+        final Map<String, double> topicAgg = {};
+        for (final s in sessions) {
+          final subjectKey = (s.subject == null || s.subject!.trim().isEmpty) ? 'MSE' : s.subject!.trim();
+          final topicKey = (s.topic == null || s.topic!.trim().isEmpty) ? 'MSE' : s.topic!.trim();
+          subjectAgg[subjectKey] = (subjectAgg[subjectKey] ?? 0) + s.duration.inMinutes.toDouble();
+          if (topicKey != 'MSE') {
+            topicAgg[topicKey] = (topicAgg[topicKey] ?? 0) + s.duration.inMinutes.toDouble();
+          }
+        }
+
+        // Weekly durations for last 7 days (Mon..Sun alignment by DateTime.weekday)
+        final List<double> week = List.filled(7, 0.0);
+        final DateTime now = DateTime.now();
+        final DateTime startOfWeek = now.subtract(Duration(days: now.weekday % 7));
+        for (final s in sessions) {
+          final date = DateTime(s.startTime.year, s.startTime.month, s.startTime.day);
+          if (date.isAfter(startOfWeek.subtract(const Duration(days: 1)))) {
+            final int idx = (date.weekday % 7); // 0 = Sunday, 6 = Saturday
+            week[idx] += s.duration.inMinutes.toDouble();
+          }
+        }
+
+        // Load quiz results and compute averages
+        final List<QuizResult> results = await QuizResultDB.instance.fetchResults();
+        double avgPct = 0.0;
+        final Map<String, List<double>> topicScores = {};
+        if (results.isNotEmpty) {
+          avgPct = results
+                  .map((r) => r.total == 0 ? 0.0 : (r.score / r.total * 100.0))
+                  .fold<double>(0.0, (a, b) => a + b) /
+              results.length;
+          for (final r in results) {
+            final key = (r.topic.isEmpty) ? 'MSE' : r.topic;
+            final pct = r.total == 0 ? 0.0 : (r.score / r.total * 100.0);
+            if (key != 'MSE') {
+              (topicScores[key] = (topicScores[key] ?? [])).add(pct);
+            }
+          }
+        }
+        final Map<String, double> topicAvg = {
+          for (final e in topicScores.entries)
+            e.key: e.value.fold<double>(0.0, (a, b) => a + b) / e.value.length
+        };
+
         setState(() {
           totalSessions = sessions.length;
           averageDurationMinutes = totalDurationMinutes / totalSessions;
           totalFocusMinutes = totalDurationMinutes.toInt();
           isLoading = false;
+          minutesBySubject = subjectAgg;
+          minutesByTopic = topicAgg;
+          weeklyDurations = week;
+          averageQuizScorePct = avgPct;
+          avgQuizByTopic = topicAvg;
         });
       } else {
         setState(() {
@@ -147,14 +205,46 @@ class _StatsPageState extends State<StatsPage> {
                       const SizedBox(height: 16),
                       _buildStatCard('Longest Streak', '$longestStreak days', Icons.local_fire_department),
                       const SizedBox(height: 16),
-                      _buildStatCard('Consistency Score', '${consistencyScore.toStringAsFixed(1)}%', Icons.check_circle),
+                    _buildStatCard('Consistency Score', '${consistencyScore.toStringAsFixed(1)}%', Icons.check_circle),
+                    const SizedBox(height: 16),
+                    _buildStatCard('Avg Quiz Score', '${averageQuizScorePct.toStringAsFixed(1)}%', Icons.quiz_outlined),
 
                       const SizedBox(height: 30),
-                      const Text(
-                        "Weekly Activity",
-                        style: TextStyle(color: Colors.white70, fontSize: 18, fontWeight: FontWeight.w600),
-                      ),
-                      const SizedBox(height: 200, child: _WeeklyBarChart()),
+                    const Text(
+                      "Weekly Focus (minutes)",
+                      style: TextStyle(color: Colors.white70, fontSize: 18, fontWeight: FontWeight.w600),
+                    ),
+                    SizedBox(height: 200, child: _WeeklyBarChart(data: weeklyDurations)),
+
+                    const SizedBox(height: 30),
+                    const Text(
+                      "By Subject",
+                      style: TextStyle(color: Colors.white70, fontSize: 18, fontWeight: FontWeight.w600),
+                    ),
+                    SizedBox(
+                      height: 220,
+                      child: _DonutPieChart(values: minutesBySubject),
+                    ),
+
+                    const SizedBox(height: 30),
+                    const Text(
+                      "By Topic",
+                      style: TextStyle(color: Colors.white70, fontSize: 18, fontWeight: FontWeight.w600),
+                    ),
+                    SizedBox(
+                      height: 220,
+                      child: _DonutPieChart(values: minutesByTopic),
+                    ),
+
+                    const SizedBox(height: 30),
+                    const Text(
+                      "Avg Quiz by Topic",
+                      style: TextStyle(color: Colors.white70, fontSize: 18, fontWeight: FontWeight.w600),
+                    ),
+                    SizedBox(
+                      height: 220,
+                      child: _DonutPieChart(values: avgQuizByTopic),
+                    ),
                     ],
                   ),
                 ),
@@ -220,27 +310,97 @@ class _StatsPageState extends State<StatsPage> {
 }
 
 class _WeeklyBarChart extends StatelessWidget {
-  const _WeeklyBarChart({Key? key}) : super(key: key);
+  final List<double> data; // index 0..6, 0=Sun, 6=Sat
+  const _WeeklyBarChart({Key? key, required this.data}) : super(key: key);
+
+  static const List<String> _labels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
   @override
   Widget build(BuildContext context) {
-    final data = [4, 6, 3, 7, 5, 2, 8]; // TODO: hook real weekly data
-
+    final double maxY = (data.isEmpty ? 0.0 : data.reduce((a, b) => a > b ? a : b)) * 1.2 + 10;
     return BarChart(
       BarChartData(
         alignment: BarChartAlignment.spaceAround,
-        maxY: 10,
+        gridData: FlGridData(show: false),
+        borderData: FlBorderData(show: false),
+        titlesData: FlTitlesData(
+          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) {
+                final int idx = value.toInt();
+                if (idx < 0 || idx >= _labels.length) return const SizedBox.shrink();
+                return Text(_labels[idx], style: const TextStyle(color: Colors.white70));
+              },
+            ),
+          ),
+        ),
+        maxY: maxY <= 0 ? 10 : maxY,
         barGroups: data.asMap().entries.map((entry) {
-          int index = entry.key;
-          int value = entry.value;
+          final int index = entry.key;
+          final double value = entry.value;
           return BarChartGroupData(
             x: index,
             barRods: [
-              BarChartRodData(toY: value.toDouble(), color: Colors.blue)
+              BarChartRodData(toY: value, color: const Color(0xFF9B4CFF), width: 14, borderRadius: BorderRadius.circular(4)),
             ],
           );
         }).toList(),
       ),
     );
+  }
+}
+
+class _DonutPieChart extends StatelessWidget {
+  final Map<String, double> values;
+  const _DonutPieChart({Key? key, required this.values}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    if (values.isEmpty) {
+      return const Center(
+        child: Text('No data yet', style: TextStyle(color: Colors.white54)),
+      );
+    }
+    final total = values.values.fold<double>(0, (a, b) => a + b);
+    final colors = _generateColors(values.length);
+    int idx = 0;
+    final sections = values.entries.map((e) {
+      final color = colors[idx++ % colors.length];
+      final percent = total == 0 ? 0 : (e.value / total * 100);
+      return PieChartSectionData(
+        color: color,
+        value: e.value,
+        title: '${e.key} \n${percent.toStringAsFixed(0)}%',
+        radius: 70,
+        titleStyle: const TextStyle(color: Colors.white, fontSize: 10),
+      );
+    }).toList();
+
+    return PieChart(
+      PieChartData(
+        sectionsSpace: 2,
+        centerSpaceRadius: 40,
+        sections: sections,
+      ),
+    );
+  }
+
+  List<Color> _generateColors(int count) {
+    const base = [
+      Color(0xFF9B4CFF),
+      Color(0xFF4CC9F0),
+      Color(0xFFF72585),
+      Color(0xFF4361EE),
+      Color(0xFF3A0CA3),
+      Color(0xFF7209B7),
+      Color(0xFF4895EF),
+      Color(0xFF560BAD),
+    ];
+    if (count <= base.length) return base.sublist(0, count);
+    return List<Color>.generate(count, (i) => base[i % base.length]);
   }
 }

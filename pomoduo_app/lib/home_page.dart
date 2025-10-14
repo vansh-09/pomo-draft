@@ -5,6 +5,8 @@ import 'package:confetti/confetti.dart';
 import 'pages/settings_page.dart';
 import 'models/subject.dart';
 import 'db/subject_db.dart';
+import 'db/session_db.dart';
+import 'models/session.dart';
 import 'widgets/circular_button.dart';
 import 'widgets/circular_timer_painter.dart';
 import 'pages/quiz_page.dart';
@@ -86,6 +88,7 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
   int _seconds = 25 * 60;
   Timer? _timer;
   bool _isRunning = false;
+  DateTime? _sessionStartTime;
 
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
@@ -171,6 +174,9 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
     setState(() => _isRunning = true);
     _pulseController.repeat(reverse: true);
 
+    // Record start time for this session
+    _sessionStartTime = DateTime.now();
+
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_seconds > 0) {
         setState(() => _seconds--);
@@ -193,6 +199,7 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
       _seconds = _focusMinutes * 60;
       _isRunning = false;
     });
+    _sessionStartTime = null;
   }
 
   void _completeTimer() async {
@@ -203,6 +210,22 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
 
     final prefs = await SharedPreferences.getInstance();
     final topic = prefs.getString('currentTopic') ?? "N/A";
+
+    // Persist completed session
+    final DateTime endTime = DateTime.now();
+    final DateTime startTime = _sessionStartTime ?? endTime.subtract(Duration(minutes: _focusMinutes));
+    final session = Session(
+      startTime: startTime,
+      endTime: endTime,
+      completed: true,
+      subject: _selectedSubject?.name,
+      topic: mapTopic(topic),
+    );
+    try {
+      await SessionDB.instance.insertSession(session);
+    } catch (_) {
+      // swallow insert error to not block UX
+    }
 
     if (!mounted) return;
 
@@ -228,7 +251,7 @@ class _TimerPageState extends State<TimerPage> with TickerProviderStateMixin {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => QuizPage(topic: mapTopic(topic)),
+        builder: (_) => QuizPage(topic: mapTopic(topic), subject: _selectedSubject?.name ?? 'MSE'),
       ),
     );
 

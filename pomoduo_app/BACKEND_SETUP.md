@@ -46,3 +46,4 @@ This has been fixed with the following improvements:
 ### Network Issues
 
 The app now works in offline mode with local questions, so network issues won't prevent quiz functionality.
+

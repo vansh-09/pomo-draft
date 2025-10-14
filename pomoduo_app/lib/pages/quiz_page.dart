@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import '../models/question.dart';
 import '../services/quiz_services.dart';
+import '../db/quiz_result_db.dart';
+import '../models/quiz_result.dart';
 
 class QuizPage extends StatefulWidget {
   final String topic;
-  const QuizPage({Key? key, required this.topic}) : super(key: key);
+  final String? subject;
+  const QuizPage({Key? key, required this.topic, this.subject}) : super(key: key);
 
   @override
   State<QuizPage> createState() => _QuizPageState();
@@ -109,11 +112,24 @@ class _QuizPageState extends State<QuizPage> {
     }
 
     if (_quizFinished) {
+      final int total = _questions.length;
+      // Save result
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        try {
+          await QuizResultDB.instance.insertResult(QuizResult(
+            topic: widget.topic,
+            subject: widget.subject ?? 'MSE',
+            score: _score,
+            total: total,
+            createdAt: DateTime.now(),
+          ));
+        } catch (_) {}
+      });
       return Scaffold(
         appBar: AppBar(title: Text("Quiz Complete")),
         body: Center(
           child: Text(
-            "🎯 Score: $_score / ${_questions.length}",
+            "🎯 Score: $_score / $total",
             style: const TextStyle(fontSize: 22),
             textAlign: TextAlign.center,
           ),

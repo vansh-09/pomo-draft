@@ -20,8 +20,9 @@ class SessionDB {
     final path = join(dbPath, filePath);
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _createDB,
+      onUpgrade: _upgradeDB,
     );
   }
 
@@ -31,9 +32,19 @@ class SessionDB {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         startTime TEXT NOT NULL,
         endTime TEXT NOT NULL,
-        completed INTEGER NOT NULL
+        completed INTEGER NOT NULL,
+        subject TEXT,
+        topic TEXT
       )
     ''');
+  }
+
+  Future<void> _upgradeDB(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      // Add nullable columns for subject and topic to existing installs.
+      await db.execute('ALTER TABLE sessions ADD COLUMN subject TEXT');
+      await db.execute('ALTER TABLE sessions ADD COLUMN topic TEXT');
+    }
   }
 
   Future<int> insertSession(Session session) async {
